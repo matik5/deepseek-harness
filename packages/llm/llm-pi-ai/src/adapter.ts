@@ -62,6 +62,8 @@ import type { ResolvedPiAiProviderProfile } from './config.ts'
 import { toPiContext } from './context.ts'
 import { toStreamChunks } from './stream.ts'
 
+const COMPACTION_HEADER = 'x-deepseek-harness-compact'
+
 /** One resolution's frozen view: the profiles and the collection built from them. */
 interface PiAiSnapshot {
   /** The resolved profiles this collection was built from, used as its identity. */
@@ -201,13 +203,20 @@ function reasoningInfo(
   }
 }
 
-/** Merge deployment headers while removing case-insensitive attribution collisions. */
-function requestHeaders(headers: Readonly<Record<string, string>> | undefined): Record<string, string> {
+/** Merge deployment headers while reserving Harness-owned request metadata. */
+function requestHeaders(
+  headers: Readonly<Record<string, string>> | undefined,
+  purpose: GenerateOptions['purpose'],
+): Record<string, string> {
   const attribution = attributionHeaders()
-  const reserved = new Set(Object.keys(attribution).map(name => name.toLowerCase()))
+  const reserved = new Set([
+    ...Object.keys(attribution).map(name => name.toLowerCase()),
+    COMPACTION_HEADER,
+  ])
   return {
     ...Object.fromEntries(Object.entries(headers ?? {}).filter(([name]) => !reserved.has(name.toLowerCase()))),
     ...attribution,
+    ...purpose === 'compaction' ? { [COMPACTION_HEADER]: '1' } : {},
   }
 }
 
@@ -378,9 +387,9 @@ export class PiAiAdapter extends LlmAdapter {
         ...options.maxTokens === undefined ? {} : { maxTokens: options.maxTokens },
         ...options.sessionId === undefined ? {} : { sessionId: String(options.sessionId) },
         signal: watchdog.signal,
-        // Profile headers are deployment-owned; attribution names are
-        // Harness-owned and therefore win collisions.
-        headers: requestHeaders(profile.headers),
+        // Profile headers are deployment-owned; attribution and request
+        // purpose names are Harness-owned and therefore win collisions.
+        headers: requestHeaders(profile.headers, options.purpose),
       })
       const iterator = toStreamChunks(events, model.contextWindow, options.signal)[Symbol.asyncIterator]()
       let exhausted = false

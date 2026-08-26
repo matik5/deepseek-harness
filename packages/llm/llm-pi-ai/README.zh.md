@@ -100,6 +100,10 @@ profile 的 `models` 列表会替换而非扩展路由的已安装目录；每�
 
 `reasoningEfforts` 声明模型可选择的 thinking 等级：每个键都是选择器提供的等级，其值是该等级过线的拼写，因此 `max: ultra` 可以为拥有自有词汇的网关重命名等级。省略该字段时保留已安装目录条目的能力；`false` 声明非推理模型。对于 pi-ai 无法识别的端点，`compat` 开关重塑请求——哪个角色携带系统提示词、哪个字段限制输出、thinking 等级如何传递——可逐路由、逐模型配置。条目与已安装目录都没有尺寸的模型，会采用路由的 `defaultContextWindow` 与 `defaultMaxTokens` 回退值。
 
+### 归 Harness 所有的请求标头
+
+每个提供方请求都会携带来自 dsh-llm `attributionHeaders()` 的共享 `User-Agent`。`GenerateOptions.purpose` 为 `compaction` 的请求还会携带 `x-deepseek-harness-compact: 1`，使兼容网关可以允许摘要器进入为恢复预留的上下文空间。这两个标头名都归 Harness 所有：配置的 `headers` 中大小写不敏感的冲突项会被移除，普通请求绝不会携带压缩标记，也不会合成提供方特定的应用归因标头。[LLM 子系统](../../../docs/subsystems/llm-streaming.zh.md)拥有共享归因约定；[压缩准入标记决策](../../../.agents/notes/implemented/feature/2026-08-26-pi-ai-compaction-admission-marker.zh.md)拥有用途标记。
+
 ### 运行时更改配置
 
 profile 通过可选 settings seam 每次操作重新读取：base 与用户的 `llm-pi-ai:` 设置分节按提供方合并，因此用户可以新增路由、覆盖组合路由的一个字段或把路由指向另一个代理，全部在下一个请求生效、无需重启。适配器无法服务的分节会在写入处被拒绝——`settings.mutate` 回答 `settings-rejected`——之后失效的已存储分节会保留 namespace 最后有效值。当路由集合或某路由的重试策略变化时，插件会原子地重新注册：冲突路由会让此前路由继续服务。

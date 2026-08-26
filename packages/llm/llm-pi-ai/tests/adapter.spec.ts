@@ -116,11 +116,27 @@ describe('PiAiAdapter provider routing', () => {
   it('merges profile headers with Harness attribution winning', async () => {
     const server = await mockServer([{ events: textEvents }])
     const ctx = await harness(server.url, {
-      headers: { 'x-company': 'private', 'User-Agent': 'wrong' },
+      headers: {
+        'x-company': 'private',
+        'User-Agent': 'wrong',
+        'X-DeepSeek-Harness-Compact': 'wrong',
+      },
     })
     await assemble(ctx, { model: 'deepseek-v4-flash', messages: [] })
     expect(server.headers[0]?.['x-company']).toBe('private')
     expect(server.headers[0]?.['user-agent']).toBe(userAgent())
+    expect(server.headers[0]?.['x-deepseek-harness-compact']).toBeUndefined()
+  })
+
+  it('marks only compaction-purpose requests for context-reserve admission', async () => {
+    const server = await mockServer([{ events: textEvents }])
+    const ctx = await harness(server.url)
+    await assemble(ctx, {
+      model: 'deepseek-v4-flash',
+      messages: [],
+      purpose: 'compaction',
+    })
+    expect(server.headers[0]?.['x-deepseek-harness-compact']).toBe('1')
   })
 
   it('forwards common stream options and profile reasoning', async () => {

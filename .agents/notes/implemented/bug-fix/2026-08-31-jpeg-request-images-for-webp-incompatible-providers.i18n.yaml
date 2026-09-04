@@ -1,0 +1,6 @@
+# Bilingual-pair consistency record (docs/i18n/README.md): the git blob hash of each
+# side as of the last confirmed-consistent state. Both languages carry equal authority;
+# after editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write .agents/notes/implemented/bug-fix/2026-08-31-jpeg-request-images-for-webp-incompatible-providers.md
+2026-08-31-jpeg-request-images-for-webp-incompatible-providers.md: 0b610db032401ac44fe529b3c99792e418f91a3d
+2026-08-31-jpeg-request-images-for-webp-incompatible-providers.zh.md: e1d2d62ddfd0dba39aa7a60f528d4ff7d2aabd0a

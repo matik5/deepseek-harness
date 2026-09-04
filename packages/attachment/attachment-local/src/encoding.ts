@@ -6,6 +6,8 @@ import type { Sharp } from 'sharp'
 export const IMAGE_ENCODING_QUALITIES = [85, 75, 60] as const
 /** Fixed lossy-WebP effort; deeper search costs 3-4x encode time for about 5% size. */
 export const WEBP_ENCODING_EFFORT = 0
+/** Background used when a model-request JPEG removes source transparency. */
+export const JPEG_ALPHA_BACKGROUND = '#ffffff'
 
 /** One ladder output carrying its complete bytes and exact facts. */
 export interface EncodedImage {
@@ -21,6 +23,24 @@ async function encode(pipeline: Sharp, mediaType: EncodedImage['mediaType'], qua
     : pipeline.jpeg({ quality })
   const { data, info } = await encoded.toBuffer({ resolveWithObject: true })
   return { data: new Uint8Array(data), mediaType, width: info.width, height: info.height }
+}
+
+/**
+ * Build the request-image quality ladder in the broadly accepted JPEG format.
+ * Transparent pixels are composited over white because JPEG has no alpha
+ * channel; durable normalization still uses {@link encodingLadder} and keeps
+ * transparency in WebP.
+ * @param prepared - sized sRGB pipeline; cloned per candidate.
+ * @returns JPEG encoders ordered from highest to lowest ladder quality.
+ */
+export function jpegEncodingLadder(prepared: Sharp): Array<() => Promise<EncodedImage>> {
+  return IMAGE_ENCODING_QUALITIES.map(quality => (
+    () => encode(
+      prepared.clone().flatten({ background: JPEG_ALPHA_BACKGROUND }),
+      'image/jpeg',
+      quality,
+    )
+  ))
 }
 
 /**

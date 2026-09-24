@@ -14,16 +14,14 @@ import type {
 } from '@deepseek-ai/dsh-attachment'
 import {
   IMAGE_ENCODING_QUALITIES,
-  WEBP_ENCODING_EFFORT,
   encodeFirstWithinLimit,
-  encodingLadder,
   isExhaustedEncoding,
 } from './encoding.ts'
-import { detectImage, encodedAlphaIsCompatible, probeImage } from './image.ts'
+import { detectImage, probeImage } from './image.ts'
 import { requireSharp } from './sharp.ts'
 
 /** Transform version included in every cache and upload-index identity. */
-export const REQUEST_IMAGE_TRANSFORM_VERSION = 'request-image-v6'
+export const REQUEST_IMAGE_TRANSFORM_VERSION = 'request-image-v7'
 
 interface EncodedRequestImage {
   data: Uint8Array
@@ -61,10 +59,9 @@ function descriptor(attachment: ImageAttachmentRef, target: ImageRequestTarget):
     targetHeight: target.height,
     encodedByteBudget: target.maxBytes,
     encoding: {
-      webpQualities: IMAGE_ENCODING_QUALITIES,
-      webpEffort: WEBP_ENCODING_EFFORT,
       jpegQualities: IMAGE_ENCODING_QUALITIES,
-      order: ['alpha:webp', 'opaque:jpeg'],
+      order: ['jpeg'],
+      alphaBackground: '#ffffff',
       colourspace: 'srgb',
     },
   })
@@ -98,9 +95,9 @@ function sourcePipeline(attachment: StoredImageAttachment): Sharp {
 async function createRequestImage(
   attachment: StoredImageAttachment,
   target: ImageRequestTarget,
-  hasAlpha: boolean,
 ): Promise<EncodedRequestImage> {
-  if (target.width >= attachment.ref.width
+  if (attachment.ref.mediaType !== 'image/webp'
+    && target.width >= attachment.ref.width
     && target.height >= attachment.ref.height
     && attachment.data.byteLength <= target.maxBytes) {
     return {
@@ -111,7 +108,13 @@ async function createRequestImage(
     }
   }
   const encodedVersion = await encodeFirstWithinLimit(
-    encodingLadder(pipeline(attachment, target), hasAlpha),
+    IMAGE_ENCODING_QUALITIES.map(quality => async () => {
+      const { data, info } = await pipeline(attachment, target)
+        .flatten({ background: '#ffffff' })
+        .jpeg({ quality })
+        .toBuffer({ resolveWithObject: true })
+      return { data: new Uint8Array(data), mediaType: 'image/jpeg' as const, width: info.width, height: info.height }
+    }),
     target.maxBytes,
   )
   return isExhaustedEncoding(encodedVersion) ? encodedVersion.smallest : encodedVersion
@@ -124,7 +127,6 @@ function cachePath(root: string, hash: string): string {
 async function readCached(
   path: string,
   target: ImageRequestTarget,
-  expectedAlpha: boolean,
   signal?: AbortSignal,
 ): Promise<VerifiedRequestImage | undefined> {
   try {
@@ -132,7 +134,7 @@ async function readCached(
     const detected = await probeImage(data)
     if (detected.depth !== 'uchar' || detected.space !== 'srgb'
       || detected.width > target.width || detected.height > target.height
-      || !encodedAlphaIsCompatible(expectedAlpha, detected)) return undefined
+      || detected.mediaType !== 'image/jpeg' || detected.hasAlpha) return undefined
     return { data, mediaType: detected.mediaType, width: detected.width, height: detected.height, hasAlpha: detected.hasAlpha }
   } catch (error: unknown) {
     if ((error as NodeJS.ErrnoException | null)?.code === 'ENOENT') return undefined
@@ -143,12 +145,11 @@ async function readCached(
 
 async function verifyRequestImage(
   image: EncodedRequestImage,
-  expectedAlpha: boolean,
 ): Promise<VerifiedRequestImage> {
   const detected = await detectImage(image.data)
   if (detected.depth !== 'uchar' || detected.space !== 'srgb'
     || detected.width !== image.width || detected.height !== image.height
-    || detected.mediaType !== image.mediaType || !encodedAlphaIsCompatible(expectedAlpha, detected)) {
+    || detected.mediaType !== image.mediaType || detected.hasAlpha) {
     throw new AttachmentError(
       'Encoded model-request image does not match its verified 8-bit sRGB metadata.',
       'ATTACHMENT_WRITE_FAILED',
@@ -188,11 +189,11 @@ export async function readRequestImageFile(
   const variantId = requestImageVariantId(attachment.ref, target)
   const hash = String(variantId).slice('sha256:'.length)
   const path = cachePath(root, hash)
-  const cached = await readCached(path, target, source.hasAlpha, signal)
-  const created = cached ?? await createRequestImage(attachment, target, source.hasAlpha)
+  const cached = await readCached(path, target, signal)
+  const created = cached ?? await createRequestImage(attachment, target)
   const version = cached ?? (created.data === attachment.data
     ? { ...created, hasAlpha: source.hasAlpha }
-    : await verifyRequestImage(created, source.hasAlpha))
+    : await verifyRequestImage(created))
   signal?.throwIfAborted()
   if (cached === undefined && version.data !== attachment.data) await writeCached(path, version.data)
   return {

@@ -187,6 +187,9 @@ describe('local request-image cache', () => {
     const unexpectedAlpha = new Uint8Array(await sharp({
       create: { width: 16, height: 8, channels: 4, background: { r: 1, g: 2, b: 3, alpha: 0.5 } },
     }).png().toBuffer())
+    const unsupportedWebp = new Uint8Array(await sharp({
+      create: { width: 22, height: 11, channels: 3, background: { r: 1, g: 2, b: 3 } },
+    }).webp().toBuffer())
 
     for (const invalid of [
       oversized,
@@ -194,6 +197,7 @@ describe('local request-image cache', () => {
       cmyk,
       tooWide,
       unexpectedAlpha,
+      unsupportedWebp,
       Uint8Array.of(1, 2, 3),
     ]) {
       await writeFile(path, invalid)
@@ -225,7 +229,7 @@ describe('local request-image cache', () => {
     expect(low.width * low.height).toBeLessThanOrEqual(512 * 512 + low.width)
   })
 
-  it('routes opaque pixels to JPEG and preserves alpha on the WebP ladder', async () => {
+  it('projects opaque and transparent pixels to provider-compatible JPEG', async () => {
     const attachments = await store()
     const side = 256
     const photoPixels = new Uint8Array(side * side * 3)
@@ -258,10 +262,10 @@ describe('local request-image cache', () => {
     const alphaRequest = await attachments.readImageRequest(alpha, { width: 128, height: 128, maxBytes: 4_096 })
 
     expect(photoRequest.mediaType).toBe('image/jpeg')
-    expect(alphaRequest.mediaType).toBe('image/webp')
-    expect(alphaRequest.bytes).toBeGreaterThan(4_096)
+    expect(alphaRequest.mediaType).toBe('image/jpeg')
+    expect(alphaRequest.bytes).toBeLessThanOrEqual(4_096)
     expect(alphaRequest).toMatchObject({ width: 128, height: 128 })
-    await expect(sharp(alphaRequest.data).metadata()).resolves.toMatchObject({ hasAlpha: true, depth: 'uchar', space: 'srgb' })
+    await expect(sharp(alphaRequest.data).metadata()).resolves.toMatchObject({ hasAlpha: false, depth: 'uchar', space: 'srgb' })
   })
 
   it.each([3, 4] as const)('projects a 16-bit %s-channel PNG as a bounded 8-bit request image', async (channels) => {
@@ -276,18 +280,18 @@ describe('local request-image cache', () => {
     expect(request.bytes).toBeLessThanOrEqual(1024 * 1024)
     expect(request.width * request.height).toBeLessThanOrEqual(16 * 16)
     await expect(sharp(request.data).metadata()).resolves.toMatchObject({
-      depth: 'uchar', space: 'srgb', hasAlpha: channels === 4,
+      depth: 'uchar', space: 'srgb', hasAlpha: false,
     })
   })
 
-  it('accepts a resized WebP request version that omits an all-opaque alpha plane', async () => {
+  it('converts a resized WebP request version to JPEG without alpha', async () => {
     const attachments = await store()
     const source = await complexOpaqueAlphaImage(64, 32)
     const attachment = await attachments.saveImage({ data: source, mediaType: 'image/png' })
 
     const request = await attachments.readImageRequest(attachment, { width: 22, height: 11, maxBytes: 1024 * 1024 })
 
-    expect(request.mediaType).toBe('image/webp')
+    expect(request.mediaType).toBe('image/jpeg')
     await expect(sharp(request.data).metadata()).resolves.toMatchObject({ hasAlpha: false })
   })
 

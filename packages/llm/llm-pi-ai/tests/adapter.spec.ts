@@ -117,11 +117,22 @@ describe('PiAiAdapter provider routing', () => {
   it('merges profile headers with Harness attribution winning', async () => {
     const server = await mockServer([{ events: textEvents }])
     const ctx = await harness(server.url, {
-      headers: { 'x-company': 'private', 'User-Agent': 'wrong' },
+      headers: { 'x-company': 'private', 'User-Agent': 'wrong', 'X-DeepSeek-Harness-Compact': '1' },
     })
     await assemble(ctx, { model: 'deepseek-flash', messages: [] })
     expect(server.headers[0]?.['x-company']).toBe('private')
     expect(server.headers[0]?.['user-agent']).toBe(userAgent())
+    expect(server.headers[0]?.['x-deepseek-harness-compact']).toBeUndefined()
+  })
+
+  it('marks compaction requests while preserving ordinary and title admission', async () => {
+    const server = await mockServer([{ events: textEvents }, { events: textEvents }, { events: textEvents }])
+    const ctx = await harness(server.url, { headers: { 'X-DeepSeek-Harness-Compact': 'wrong', 'x-company': 'private' } })
+    for (const purpose of [undefined, 'compaction', 'session-title'] as const) {
+      await assemble(ctx, { model: 'deepseek-flash', messages: [], ...purpose === undefined ? {} : { purpose } })
+    }
+    expect(server.headers.map(headers => headers['x-deepseek-harness-compact'])).toEqual([undefined, '1', undefined])
+    expect(server.headers.map(headers => headers['x-company'])).toEqual(['private', 'private', 'private'])
   })
 
   it('forwards common stream options and profile reasoning', async () => {
